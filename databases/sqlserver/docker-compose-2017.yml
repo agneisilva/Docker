@@ -1,0 +1,23 @@
+version: '3.4'
+
+services:
+    sql.data:
+        image: mcr.microsoft.com/mssql/server:2017-CU11-ubuntu
+        container_name: sql.data
+        networks:
+           - bridge-network
+        environment:
+          - SA_PASSWORD=!QAZxsw2#EDC
+          - ACCEPT_EULA=Y
+        ports:
+          - "1433:1433"   
+        volumes: 
+          - mssql-server-linux-data:/var/opt/mssql/data   
+        
+volumes:
+  mssql-server-linux-data:
+          
+          
+networks: 
+  bridge-network:
+    driver: bridge
