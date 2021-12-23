@@ -1,0 +1,221 @@
+version: '3.4'
+
+services:
+
+  identityservice:
+    image: noahsmart/identityservice:linux-latest
+    container_name: identityservice
+    restart: always
+    networks:
+      - bridge-network
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - IDENTITYSERVICE_URLS=http://localhost:80
+      - ConnectionString=Server=sql.data;Database=NoahidentityDb;MultipleActiveResultSets=true;User Id=sa;Password=!QAZxsw2#EDC;
+      - ApiURI=http://${NOAH_EXTERNAL_DNS_NAME_OR_IP}:10001
+      - FrontendURI=http://${NOAH_EXTERNAL_DNS_NAME_OR_IP}:8002
+    ports:
+      - "8000:80"   
+    
+  webapi:
+    image: noahsmart/noah.webapi:linux-latest
+    container_name: noah.webapi
+    restart: always
+    depends_on:
+      - influxdb
+      - identityservice
+      - mongo
+    networks:
+      - bridge-network
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - WEBAPI_URLS=http://+:80
+      - IdentityServerURI=http://${NOAH_EXTERNAL_DNS_NAME_OR_IP}:8000
+      - FrontendURI=http://${NOAH_EXTERNAL_DNS_NAME_OR_IP}:8002
+
+      - MONGODB_HOST=mongo
+      - MONGODB_DATABASE=noah_db
+      - MONGODB_PORT=27017
+      - MONGODB_USER=root
+      - MONGODB_PASSWORD=MongoDB2020!
+
+      - INFLUXDB_HOST=influxdb
+      - INFLUXDB_PORT=8086
+      - INFLUXDB_USERNAME=noah
+      - INFLUXDB_PASSWORD=Confitec123
+      - INFLUXDB_USESSL=false
+      - INFLUXDB_DATABASE=noah_db
+    ports:
+      - "10001:80"
+    
+  noah.spa:
+    image: noahsmart/noah.spa:linux-latest
+    container_name: noah.spa
+    depends_on:
+      - identityservice
+      - webapi
+    environment:
+      - production=false
+      - IdentityServerURI=http://${NOAH_EXTERNAL_DNS_NAME_OR_IP}:8000
+      - ApiURI=http://${NOAH_EXTERNAL_DNS_NAME_OR_IP}:10001
+      - FrontendURI=http://${NOAH_EXTERNAL_DNS_NAME_OR_IP}:8002
+    ports:
+      - "8002:80"
+
+  backgroundservice:
+    image: noahsmart/backgroundservice:linux-latest
+    container_name: backgroundservice
+    restart: unless-stopped
+    depends_on: 
+      - mongo
+      - influxdb
+    links:
+      - mongo
+    networks:
+      - bridge-network
+    environment:
+      - MONGODB_HOST=mongo
+      - MONGODB_DATABASE=noah_db
+      - MONGODB_PORT=27017
+      - MONGODB_USER=root
+      - MONGODB_PASSWORD=MongoDB2020!
+
+      - INFLUXDB_HOST=influxdb
+      - INFLUXDB_PORT=8086
+      - INFLUXDB_USERNAME=noah
+      - INFLUXDB_PASSWORD=Confitec123
+      - INFLUXDB_USESSL=false
+      - INFLUXDB_DATABASE=noah_db
+
+      - SENSOR_INTERVAL_SIGNAL=300000 
+
+      - MQTT_HOSTNAME=mosquitto
+      - MQTT_PORT=1883
+    
+  sql.data:
+    image: mcr.microsoft.com/mssql/server:2017-CU11-ubuntu
+    container_name: sql.data
+    networks:
+        - bridge-network
+    volumes: 
+        - mssql-server-linux-data:/var/opt/mssql/data   
+    environment:
+      - SA_PASSWORD=!QAZxsw2#EDC
+      - ACCEPT_EULA=Y
+    ports:
+      - "1433:1433"
+  
+  mongo:
+    image: mongo:latest
+    restart: unless-stopped
+    container_name: mongo
+    networks:
+      - bridge-network
+    volumes:
+      - mongodb:/data/db
+      - mongodb_config:/data/configdb
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=MongoDB2020!
+    ports:
+      - "27017:27017"
+
+  mongo.express:
+    image: mongo-express
+    restart: always
+    links:
+      - mongo
+    depends_on: 
+      - mongo
+    networks:
+      - bridge-network
+    environment:
+      - ME_CONFIG_BASICAUTH_USERNAME=noah
+      - ME_CONFIG_BASICAUTH_PASSWORD=MongoExpress2020!
+      - ME_CONFIG_MONGODB_PORT=27017
+      - ME_CONFIG_MONGODB_ADMINUSERNAME=root
+      - ME_CONFIG_MONGODB_ADMINPASSWORD=MongoDB2020!
+    ports:
+      - "8081:8081"
+
+  mosquitto:
+    image: eclipse-mosquitto:1.6.11
+    container_name: mosquitto
+    restart: unless-stopped
+    networks:
+      - bridge-network
+    ports:
+      - "1883:1883"
+
+  portainer:
+    image: portainer/portainer
+    command: -H unix:///var/run/docker.sock
+    restart: always
+    volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+        - portainer_data:/data
+    ports:
+        - 9000:9000
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    restart: always
+    ports:
+      - 3000:3000
+    networks:
+      - bridge-network
+    volumes:
+      - grafana-volume:/vol01/Docker/monitoring
+    environment: 
+      - GF_SECURITY_ADMIN_USER=noah
+      - GF_SECURITY_ADMIN_PASSWORD=Noah@123
+      
+  influxdb:
+    image: influxdb
+    container_name: influxdb
+    restart: always
+    ports:
+      - 8086:8086
+    networks:
+      - bridge-network
+    volumes:
+      - influxdb-volume:/vol01/Docker/monitoring
+    environment:
+      - INFLUXDB_DB=telegraf
+      - INFLUXDB_USER=admin
+      - INFLUXDB_ADMIN_ENABLED=true
+
+      - INFLUXDB_ADMIN_USER=admin
+      - INFLUXDB_ADMIN_PASSWORD=noah@123
+  
+  telegraf:
+    image: telegraf
+    container_name: telegraf
+    restart: always
+    extra_hosts:
+      - "influxdb:169.57.129.134"
+    environment:
+      HOST_PROC: /rootfs/proc
+      HOST_SYS: /rootfs/sys
+      HOST_ETC: /rootfs/etc
+    volumes:
+      - ./config/telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/rootfs/sys:ro
+      - /proc:/rootfs/proc:ro
+      - /etc:/rootfs/etc:ro
+      
+volumes:
+  mssql-server-linux-data:
+  mongodb:
+  mongodb_config:
+  portainer_data:
+  grafana-volume:
+    #external: true
+  influxdb-volume:
+    #external: true
+
+networks: 
+  bridge-network:
+    driver: bridge
